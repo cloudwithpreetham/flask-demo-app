@@ -17,17 +17,21 @@ pipeline {
         }
 
         stage('Test') {
-            agent {
-                docker {
-                    image 'python:3.11-alpine'
-                    reuseNode true
-                }
-            }
             steps {
-                echo 'Running pytest inside Python container...'
+                echo 'Running pytest inside an isolated Python container...'
                 sh '''
-                    pip install --no-cache-dir -r requirements.txt
-                    pytest -v
+                    # 1. Create a container and copy workspace files into it
+                    docker create --name flask-test-runner -w /app python:3.11-alpine tail -f /dev/null
+                    docker cp . flask-test-runner:/app
+                    docker start flask-test-runner
+
+                    # 2. Install dependencies and run tests inside the container
+                    docker exec flask-test-runner pip install --no-cache-dir -r requirements.txt
+                    docker exec flask-test-runner pytest -v
+
+                    # 3. Clean up the test container
+                    docker stop flask-test-runner
+                    docker rm flask-test-runner
                 '''
             }
         }
@@ -44,7 +48,7 @@ pipeline {
 
         stage('Push to Registry') {
             steps {
-                echo 'Pushing to Docker Hub...'
+                echo 'Pushing image to Docker Hub...'
                 withCredentials([usernamePassword(
                     credentialsId: "${DOCKERHUB_CREDENTIALS_ID}",
                     passwordVariable: 'DOCKER_PASS',
@@ -61,7 +65,7 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                echo "Deploying container on port ${APP_PORT}..."
+                echo "Deploying application on port ${APP_PORT}..."
                 sh """
                     docker stop ${CONTAINER_NAME} || true
                     docker rm ${CONTAINER_NAME} || true
@@ -73,8 +77,11 @@ pipeline {
 
     post {
         always {
-            echo 'Pruning dangling images...'
-            sh 'docker image prune -f || true'
+            echo 'Pruning dangling images and cleaning test remnants...'
+            sh '''
+                docker rm -f flask-test-runner || true
+                docker image prune -f || true
+            '''
         }
         success {
             echo 'Pipeline executed successfully!'
