@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     environment {
-        // Update with your Docker Hub username
         DOCKERHUB_CREDENTIALS_ID = 'dockerhub-credentials'
         DOCKER_IMAGE_NAME        = 'cloudwithpreetham/flask-demo-app'
         APP_PORT                 = '5000'
@@ -13,16 +12,16 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo 'Checking out source code from Git repository...'
-                checkout scms
+                checkout scm
             }
         }
 
         stage('Test') {
             steps {
-                echo 'Running unit tests with pytest inside a Python container...'
+                echo 'Executing pytest unit tests inside a Python container...'
                 sh '''
-                    docker run --rm -v $(pwd):/app -w /app python:3.11-alpine \
-                    sh -c "pip install --no-cache-dir -r requirements.txt && pytest"
+                    docker run --rm -v "$(pwd):/app" -w /app python:3.11-alpine \
+                    sh -c "pip install --no-cache-dir -r requirements.txt && pytest -v"
                 '''
             }
         }
@@ -37,10 +36,14 @@ pipeline {
             }
         }
 
-        stage('Push to Registry') {
+        stage('Push to Docker Hub') {
             steps {
-                echo 'Pushing image to Docker Hub...'
-                withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDENTIALS_ID}", passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
+                echo 'Authenticating and pushing container image to Docker Hub...'
+                withCredentials([usernamePassword(
+                    credentialsId: "${DOCKERHUB_CREDENTIALS_ID}",
+                    passwordVariable: 'DOCKER_PASS',
+                    usernameVariable: 'DOCKER_USER'
+                )]) {
                     sh """
                         echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
                         docker push ${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}
@@ -52,7 +55,7 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                echo "Deploying application container on port ${APP_PORT}..."
+                echo "Deploying container locally on port ${APP_PORT}..."
                 sh """
                     docker stop ${CONTAINER_NAME} || true
                     docker rm ${CONTAINER_NAME} || true
@@ -68,10 +71,10 @@ pipeline {
             sh 'docker image prune -f || true'
         }
         success {
-            echo 'Jenkins pipeline completed successfully!'
+            echo 'Pipeline executed successfully!'
         }
         failure {
-            echo 'Jenkins pipeline failed. Check console output for logs.'
+            echo 'Pipeline failed. Check stage console logs.'
         }
     }
 }
